@@ -14,5 +14,4 @@ try:
 	adapter = adapters[0]
 	menus.main_menu(adapter)
 finally:
-	pass
 	os.killpg(os.getpgid(agent.pid), SIGTERM)
