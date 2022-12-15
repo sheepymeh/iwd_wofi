@@ -1,35 +1,34 @@
 #!/usr/bin/python3
 
-import dbus
-from dbus import Interface
-from time import sleep
+from asyncio import sleep
+from dbus_next import Variant
 
-def power_on(adapter):
-	adapter_interface = Interface(adapter.proxy, 'org.freedesktop.DBus.Properties')
-	device_interface = Interface(adapter.devices[0].proxy, 'org.freedesktop.DBus.Properties')
+async def power_on(adapter):
+	adapter_interface = adapter.proxy.get_interface('org.freedesktop.DBus.Properties')
+	device_interface = adapter.devices[0].proxy.get_interface('org.freedesktop.DBus.Properties')
 
-	adapter_interface.Set('net.connman.iwd.Adapter', 'Powered', dbus.Boolean(1))
-	device_interface.Set('net.connman.iwd.Device', 'Powered', dbus.Boolean(1))
+	await adapter_interface.call_set('net.connman.iwd.Adapter', 'Powered', Variant('b', True))
+	await device_interface.call_set('net.connman.iwd.Device', 'Powered', Variant('b', True))
 
-def power_off(adapter):
-	adapter_interface = Interface(adapter.proxy, 'org.freedesktop.DBus.Properties')
-	device_interface = Interface(adapter.devices[0].proxy, 'org.freedesktop.DBus.Properties')
+async def power_off(adapter):
+	adapter_interface = adapter.proxy.get_interface('org.freedesktop.DBus.Properties')
+	device_interface = adapter.devices[0].proxy.get_interface('org.freedesktop.DBus.Properties')
 
-	device_interface.Set('net.connman.iwd.Device', 'Powered', dbus.Boolean(0))
-	adapter_interface.Set('net.connman.iwd.Adapter', 'Powered', dbus.Boolean(0))
+	await device_interface.call_set('net.connman.iwd.Device', 'Powered', Variant('b', False))
+	await adapter_interface.call_set('net.connman.iwd.Adapter', 'Powered', Variant('b', False))
 
-def scan(device):
-	station_interface = Interface(device.proxy, 'net.connman.iwd.Station')
-	props_interface = Interface(device.proxy, 'org.freedesktop.DBus.Properties')
-	station_interface.Scan()
-	while props_interface.Get('net.connman.iwd.Station', 'Scanning'):
-		sleep(.5)
-	return station_interface.GetOrderedNetworks()
+async def scan(device):
+	station_interface = device.proxy.get_interface('net.connman.iwd.Station')
+	props_interface = device.proxy.get_interface('org.freedesktop.DBus.Properties')
+	await station_interface.call_scan()
+	while await props_interface.call_get('net.connman.iwd.Station', 'Scanning'):
+		await sleep(.5)
+	return await station_interface.call_get_ordered_networks()
 
-def connect(network):
-	interface = Interface(network, 'net.connman.iwd.Network')
-	interface.Connect()
+async def connect(network):
+	interface = network.get_interface('net.connman.iwd.Network')
+	await interface.call_connect()
 
-def disconnect(device):
-	interface = Interface(device.proxy, 'net.connman.iwd.Station')
-	interface.Disconnect()
+async def disconnect(device):
+	interface = device.proxy.get_interface('net.connman.iwd.Station')
+	await interface.call_disconnect()

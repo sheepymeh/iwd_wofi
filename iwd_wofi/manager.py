@@ -1,22 +1,16 @@
 #!/usr/bin/python3
 
-import dbus
-from dbus import Interface
 import collections
+from .dbus_helper import dbus_proxy
 
-bus = dbus.SystemBus()
+async def init(bus):
+	Obj = collections.namedtuple('Obj', ['interfaces', 'children'])
+	Adapter = collections.namedtuple('Adapter', ['proxy', 'phy', 'powered', 'name', 'devices'])
+	Device = collections.namedtuple('Device', ['proxy', 'name', 'address', 'powered', 'state', 'connected'])
+	Network = collections.namedtuple('Network', ['path', 'phy'])
 
-Obj = collections.namedtuple('Obj', ['interfaces', 'children'])
-Adapter = collections.namedtuple('Adapter', ['proxy', 'phy', 'powered', 'name', 'devices'])
-Device = collections.namedtuple('Device', ['proxy', 'name', 'address', 'powered', 'state', 'connected'])
-Network = collections.namedtuple('Network', ['path', 'phy'])
-
-def dbus_proxy(path):
-	return bus.get_object('net.connman.iwd', path)
-
-def init():
-	manager = Interface(dbus_proxy('/'), 'org.freedesktop.DBus.ObjectManager')
-	objects = manager.GetManagedObjects()
+	manager = (await dbus_proxy(bus, '/')).get_interface('org.freedesktop.DBus.ObjectManager')
+	objects = await manager.call_get_managed_objects()
 
 	tree = Obj({}, {})
 	for path in objects:
@@ -42,15 +36,15 @@ def init():
 					state = device.interfaces['net.connman.iwd.Station']['State']
 					connected_network = device.interfaces['net.connman.iwd.Station'].get('ConnectedNetwork', None)
 				devices.append(Device(
-					dbus_proxy(device_path),
+					await dbus_proxy(bus, device_path),
 					device.interfaces['net.connman.iwd.Device']['Name'],
 					device.interfaces['net.connman.iwd.Device']['Address'],
 					device.interfaces['net.connman.iwd.Device']['Powered'],
 					state,
-					device.children[connected_network][0]['net.connman.iwd.Network']['Name'] if connected_network else None
+					device.children[str(connected_network)][0]['net.connman.iwd.Network']['Name'] if connected_network else None
 				))
 			adapters.append(Adapter(
-				dbus_proxy(path),
+				await dbus_proxy(bus, path),
 				phy,
 				phy.interfaces['net.connman.iwd.Adapter']['Powered'],
 				phy.interfaces['net.connman.iwd.Adapter']['Name'],

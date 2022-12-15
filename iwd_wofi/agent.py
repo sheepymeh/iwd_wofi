@@ -1,72 +1,68 @@
 #!/usr/bin/python3
 
-from gi.repository import GLib
-
-import dbus
-import dbus.service
-import dbus.mainloop.glib
 from random import randrange
 
-from wofi import Wofi
+from dbus_next.service import ServiceInterface, method
+from dbus_next import DBusError
+
+from .wofi import Wofi
+from .dbus_helper import dbus_proxy
 
 wofi = Wofi()
 
-class Canceled(dbus.DBusException):
-	_dbus_error_name = 'net.connman.iwd.Error.Canceled'
+class Canceled(DBusError):
+	def __init__(self, err: str):
+		super().__init__('net.connman.iwd.Error.Canceled', err)
 
-class Agent(dbus.service.Object):
-	@dbus.service.method('net.connman.iwd.Agent', in_signature='', out_signature='')
-	def Release(self):
-		print('Release')
-		mainloop.quit()
+class Agent(ServiceInterface):
+	def __init__(self, bus):
+		super().__init__('net.connman.iwd.Agent')
+		self.bus = bus
 
-	@dbus.service.method('net.connman.iwd.Agent', in_signature='o', out_signature='s')
-	def RequestPassphrase(self, path):
-		passphrase = wofi.show('Enter your Wi-Fi password', True)
+	@method()
+	async def Release(self) -> '':
+		await self.bus.wait_for_disconnect()
+
+	@method()
+	async def RequestPassphrase(self, path: 'o') -> 's':
+		passphrase = await wofi.show('Enter your Wi-Fi password', True)
 		if not passphrase:
 			raise Canceled('canceled')
 
 		return passphrase
 
-	@dbus.service.method('net.connman.iwd.Agent', in_signature='o', out_signature='s')
-	def RequestPrivateKeyPassphrase(self, path):
-		passphrase = wofi.show('Enter your key passphrase', True)
+	@method()
+	async def RequestPrivateKeyPassphrase(self, path: 'o') -> 's':
+		passphrase = await wofi.show('Enter your key passphrase', True)
 		if not passphrase:
 			raise Canceled('canceled')
 
 		return passphrase
 
-	@dbus.service.method('net.connman.iwd.Agent', in_signature='o', out_signature='ss')
-	def RequestUserNameAndPassword(self, path):
-		username = wofi.show('Enter your network username')
+	@method()
+	async def RequestUserNameAndPassword(self, path: 'o') -> 'ss':
+		username = await wofi.show('Enter your network username')
 		if not username:
 			raise Canceled('canceled')
 
-		passphrase = wofi.show('Enter your network password', True)
+		passphrase = await wofi.show('Enter your network password', True)
 		if not passphrase:
 			raise Canceled('canceled')
 
 		return (username, passphrase)
 
-	@dbus.service.method('net.connman.iwd.Agent', in_signature='s', out_signature='')
-	def Cancel(self, reason):
+	@method()
+	def Cancel(self, reason: 's') -> '':
 		print(f'Cancel: {reason}')
 
-dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+async def start_agent(bus, future):
+	path = f'/iwd_wofi/agent/{str(randrange(1000))}'
+	agent = Agent(bus)
+	bus.export(path, agent)
 
-bus = dbus.SystemBus()
-manager = dbus.Interface(
-	bus.get_object('net.connman.iwd', '/net/connman/iwd'),
-	'net.connman.iwd.AgentManager'
-)
+	proxy_object = await dbus_proxy(bus, '/net/connman/iwd')
+	manager = proxy_object.get_interface('net.connman.iwd.AgentManager')
+	await manager.call_register_agent(path)
 
-path = f'/iwd_wofi/agent/{str(randrange(1000))}'
-object = Agent(bus, path)
-
-try:
-	manager.RegisterAgent(path)
-except:
-	exit('Failed to register iwd agent')
-
-mainloop = GLib.MainLoop()
-mainloop.run()
+	await future
+	await manager.call_unregister_agent(path)

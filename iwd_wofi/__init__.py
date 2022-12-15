@@ -1,17 +1,33 @@
 #!/usr/bin/python3
 
-import os
-from subprocess import Popen
-from signal import SIGTERM
+import asyncio
+from dbus_next.aio import MessageBus
+from dbus_next import BusType
 
-import menus
-from manager import init
+from . import menus
+from .manager import init
+from .agent import start_agent
+from .dbus_helper import prepare_dbus
 
-agent = Popen(('/usr/bin/python3', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agent.py')), preexec_fn=os.setsid)
-
-try:
-	adapters, known_networks = init()
+async def show_menu(bus, future):
+	adapters, known_networks = await init(bus)
 	adapter = adapters[0]
-	menus.main_menu(adapter)
-finally:
-	os.killpg(os.getpgid(agent.pid), SIGTERM)
+	await menus.main_menu(bus, adapter)
+	future.set_result(None)
+
+def main():
+	prepare_dbus()
+	loop = asyncio.get_event_loop()
+	bus = loop.run_until_complete(MessageBus(bus_type=BusType(2)).connect())
+	future = loop.create_future()
+	try:
+		tasks = [
+			loop.create_task(start_agent(bus, future)),
+			loop.create_task(show_menu(bus, future))
+		]
+		loop.run_until_complete(asyncio.wait([future]))
+	except KeyboardInterrupt:
+		future.set_result(None)
+	finally:
+		loop.run_until_complete(asyncio.wait(tasks))
+		loop.close()
